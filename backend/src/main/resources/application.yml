@@ -1,0 +1,41 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: spectra-backend
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/spectra}
+      database: spectra
+  web:
+    cors:
+      allowed-origins: "http://localhost:3000"
+
+spectra:
+  jwt:
+    secret: ${JWT_SECRET:spectra-super-secret-key-change-in-production-min-256-bits}
+    expiration-ms: 86400000   # 24 hours
+  flask:
+    url: ${FLASK_URL:http://localhost:5001}
+    api-key: ${FLASK_API_KEY:spectra-dev-key-change-in-prod}
+  blockchain:
+    rpc-url: ${BLOCKCHAIN_RPC:http://localhost:7545}
+    contract-address: ${CONTRACT_ADDRESS:}
+    private-key: ${BLOCKCHAIN_PRIVATE_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.spectra: DEBUG
+    org.springframework.security: INFO
