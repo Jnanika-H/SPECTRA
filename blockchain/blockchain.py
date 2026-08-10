@@ -76,27 +76,31 @@ def get_account(w3):
 # ── Compilation ───────────────────────────────────────────────────────────────
 
 def compile_contract() -> tuple[str, str]:
-    """Compile ForensicStorage.sol and return (abi, bytecode)."""
-    try:
-        from solcx import compile_source, install_solc, get_installed_solc_versions
-    except ImportError:
-        log.error("py-solc-x not installed. Run: pip install py-solc-x")
+    import subprocess
+    import json
+
+    solc_path = r"C:\Users\Jnanika\solc\solc.exe"
+    contract_file = str(CONTRACT_PATH)
+
+    result = subprocess.run(
+        [solc_path, "--combined-json", "abi,bin", contract_file],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        log.error(result.stderr)
         sys.exit(1)
 
-    if "0.8.19" not in [str(v) for v in get_installed_solc_versions()]:
-        log.info("Installing solc 0.8.19…")
-        install_solc("0.8.19")
+    compiled = json.loads(result.stdout)
 
-    source = CONTRACT_PATH.read_text()
-    compiled = compile_source(
-        source,
-        output_values=["abi", "bin"],
-        solc_version="0.8.19",
-    )
-    contract_id = "<stdin>:ForensicStorage"
-    abi      = compiled[contract_id]["abi"]
-    bytecode = compiled[contract_id]["bin"]
-    log.info(f"Compiled ForensicStorage.sol ({len(bytecode)//2} bytes)")
+    contract_key = list(compiled["contracts"].keys())[0]
+    contract_data = compiled["contracts"][contract_key]
+
+    abi = contract_data["abi"]
+    bytecode = contract_data["bin"]
+
+    log.info(f"Compiled contract ({len(bytecode)//2} bytes)")
     return json.dumps(abi), bytecode
 
 

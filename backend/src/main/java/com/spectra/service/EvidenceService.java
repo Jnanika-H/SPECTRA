@@ -29,7 +29,18 @@ public class EvidenceService {
 
     public List<Evidence> ingest(IngestRequest req, String submitter) {
         List<Evidence> saved = new ArrayList<>();
-        for (Map<String, Object> rawArt : req.getArtifacts()) {
+        List<Map<String, Object>> artifacts = req.getArtifacts();
+        
+        // Check if this is a real evidence collection request
+        if (artifacts.size() == 1 && artifacts.get(0).containsKey("mode") 
+            && "collect".equals(artifacts.get(0).get("mode"))) {
+            // Call Python evidence collector
+            Map<String, Object> config = (Map<String, Object>) artifacts.get(0).get("config");
+            artifacts = collectRealEvidence(config);
+            log.info("Collected {} real artifacts from paths", artifacts.size());
+        }
+        
+        for (Map<String, Object> rawArt : artifacts) {
             Evidence evidence = Evidence.builder()
                 .caseId(req.getCaseId())
                 .submittedBy(submitter)
@@ -42,6 +53,109 @@ public class EvidenceService {
         }
         log.info("Ingested {} artifacts for case {}", saved.size(), req.getCaseId());
         return saved;
+    }
+    
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> collectRealEvidence(Map<String, Object> config) {
+        java.io.File tempFile = null;
+        try {
+            // Add max_files limit to config (default 1000)
+            if (!config.containsKey("max_files")) {
+                config.put("max_files", 1000);
+            }
+            
+            // Call Python evidence collector script
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String configJson = mapper.writeValueAsString(config);
+            
+            // Write config to temporary file (avoids Windows command-line escaping issues)
+            tempFile = java.io.File.createTempFile("spectra_config_", ".json");
+            java.nio.file.Files.write(tempFile.toPath(), configJson.getBytes());
+            
+            // Get the project root directory (parent of backend folder)
+            String projectRoot = System.getProperty("user.dir");
+            if (projectRoot.endsWith("backend")) {
+                projectRoot = new java.io.File(projectRoot).getParent();
+            }
+            String scriptPath = projectRoot + java.io.File.separator + "ingestion" + 
+                               java.io.File.separator + "evidence_collector.py";
+            
+            log.info("Calling Python script at: {}", scriptPath);
+            log.info("Config: max_files={}, paths={}", config.get("max_files"), 
+                config.keySet().stream().filter(k -> k.endsWith("_path")).toList());
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                "python", 
+                scriptPath,
+                "--config-file", tempFile.getAbsolutePath()
+            );
+            // DO NOT redirect error stream - we need to read them separately
+            // pb.redirectErrorStream(true);  // REMOVED - this was causing logs to mix with JSON
+            Process process = pb.start();
+            
+            // Read output - separate JSON from logs
+            java.io.BufferedReader stdoutReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream())
+            );
+            java.io.BufferedReader stderrReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getErrorStream())
+            );
+            
+            // Read stderr (logs) in a separate thread
+            StringBuilder logs = new StringBuilder();
+            Thread logThread = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = stderrReader.readLine()) != null) {
+                        logs.append(line).append("\n");
+                        // Log progress messages from Python
+                        if (line.contains("Progress:") || line.contains("Scanning") || 
+                            line.contains("complete") || line.contains("artifacts")) {
+                            log.info("Python: {}", line);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error reading stderr: {}", e.getMessage());
+                }
+            });
+            logThread.start();
+            
+            // Read stdout (JSON only)
+            StringBuilder jsonOutput = new StringBuilder();
+            String line;
+            while ((line = stdoutReader.readLine()) != null) {
+                jsonOutput.append(line);
+            }
+            
+            int exitCode = process.waitFor();
+            logThread.join(1000); // Wait for log thread to finish
+            
+            // Clean up temp file
+            if (tempFile != null && tempFile.exists()) {
+                tempFile.delete();
+            }
+            
+            if (exitCode != 0) {
+                log.error("Evidence collector failed with exit code {}", exitCode);
+                log.error("Logs: {}", logs.toString());
+                return new ArrayList<>();
+            }
+            
+            // Parse JSON output
+            String jsonStr = jsonOutput.toString();
+            log.info("Received {} bytes from evidence collector", jsonStr.length());
+            
+            return mapper.readValue(jsonStr, 
+                mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+                
+        } catch (Exception e) {
+            log.error("Failed to collect real evidence: {}", e.getMessage(), e);
+            // Clean up temp file on error
+            if (tempFile != null && tempFile.exists()) {
+                tempFile.delete();
+            }
+            return new ArrayList<>();
+        }
     }
 
     public Map<String, Object> analyze(AnalyzeRequest req, String investigator) {
@@ -83,7 +197,8 @@ public class EvidenceService {
                     "type", ev.getEvidenceType(),
                     "finalScore", finalScore,
                     "severity", severity,
-                    "isAnomaly", isAnomaly
+                    "isAnomaly", isAnomaly,
+                    "rawArtifact", ev.getRawArtifact() != null ? ev.getRawArtifact() : Map.of()
                 ));
             } catch (Exception e) {
                 log.error("Failed to score evidence {}: {}", ev.getId(), e.getMessage());
@@ -93,10 +208,16 @@ public class EvidenceService {
         // Build timeline via Flask
         List<Map<String, Object>> rawArtifacts = evidenceList.stream()
             .map(Evidence::getRawArtifact).filter(Objects::nonNull).toList();
-        Map timelineResult = Map.of();
+        Map timelineData = Map.of();
         if (!rawArtifacts.isEmpty()) {
             try {
-                timelineResult = callFlask("/timeline", Map.of("artifacts", rawArtifacts));
+                Map timelineResponse = callFlask("/timeline", Map.of("artifacts", rawArtifacts));
+                // Extract timeline data from Flask response
+                if (timelineResponse != null && timelineResponse.containsKey("timeline")) {
+                    timelineData = (Map) timelineResponse.get("timeline");
+                    log.info("Timeline received with {} events", 
+                        timelineData.containsKey("events") ? ((List)timelineData.get("events")).size() : 0);
+                }
             } catch (Exception e) {
                 log.warn("Timeline error: {}", e.getMessage());
             }
@@ -108,7 +229,7 @@ public class EvidenceService {
             "anomalies",        anomalies,
             "averageScore",     scored.isEmpty() ? 0 : totalScore / scored.size(),
             "results",          scored,
-            "timeline",         timelineResult
+            "timeline",         timelineData
         );
     }
 

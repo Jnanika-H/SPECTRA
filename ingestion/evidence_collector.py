@@ -46,7 +46,12 @@ RULE_OVERRIDES = {
 
 RISKY_EXTENSIONS = {
     ".exe", ".bat", ".ps1", ".vbs", ".hta", ".scr",
-    ".pif", ".com", ".cmd", ".jar", ".js", ".wsf",
+    ".pif", ".com", ".cmd", ".jar", ".wsf",
+}
+
+# .js files are context-dependent - check content for malicious patterns
+CONTEXT_DEPENDENT_EXTENSIONS = {
+    ".js", ".jsx", ".json", ".py", ".sh", ".php"
 }
 
 SAFE_EXTENSIONS = {
@@ -54,28 +59,85 @@ SAFE_EXTENSIONS = {
     ".xlsx", ".csv", ".html", ".mp4", ".mp3",
 }
 
+# Malicious JavaScript patterns
+MALICIOUS_JS_PATTERNS = [
+    "eval(",
+    "document.write(",
+    "unescape(",
+    "fromCharCode",
+    "ActiveXObject",
+    "WScript.Shell",
+    "Shell.Application",
+    "base64_decode",
+    "atob(",
+    "btoa(",
+    "crypto.subtle",
+    "XMLHttpRequest",
+    "fetch(",
+    # Obfuscation indicators
+    "\\x",
+    "\\u00",
+    # Ransomware indicators
+    "encrypt",
+    "decrypt",
+    "ransom",
+    "bitcoin",
+    "wallet",
+    # Exploit indicators
+    "shellcode",
+    "payload",
+    "exploit",
+    "vulnerability",
+]
+
 # ── 1. File System Evidence ───────────────────────────────────────────────────
 
 class FileSystemParser:
     """Scans a directory and extracts forensic artifacts."""
+    
+    # Folders to skip during scanning (common large/irrelevant directories)
+    EXCLUDED_FOLDERS = {
+        'node_modules', '.git', '.svn', '.hg', '__pycache__', 
+        '.venv', 'venv', 'env', 'target', 'build', 'dist',
+        '.dist', '.idea', '.vscode', 'vendor', 'packages'
+    }
 
-    def parse(self, root_path: str, max_depth: int = 4) -> list[dict]:
+    def parse(self, root_path: str, max_depth: int = 4, max_files: int = 1000) -> list[dict]:
         artifacts = []
         root = Path(root_path)
         if not root.exists():
             log.warning(f"Path does not exist: {root_path}")
             return artifacts
 
+        file_count = 0
+        skipped_count = 0
+        log.info(f"Starting scan of {root_path} (max {max_files} files, depth {max_depth})")
+        
         for item in self._walk(root, max_depth):
+            if file_count >= max_files:
+                log.warning(f"Reached maximum file limit ({max_files}). Stopping scan.")
+                log.info(f"Scanned {file_count} files, skipped {skipped_count} files")
+                break
+            
             artifact = self._analyze_file(item)
             if artifact:
                 artifacts.append(artifact)
+                file_count += 1
+                # Progress logging every 100 files
+                if file_count % 100 == 0:
+                    log.info(f"Progress: {file_count} files scanned...")
+            else:
+                skipped_count += 1
 
-        log.info(f"File system scan: {len(artifacts)} artifacts from {root_path}")
+        log.info(f"File system scan complete: {len(artifacts)} artifacts from {root_path}")
+        log.info(f"Total: {file_count} files scanned, {skipped_count} files skipped")
         return artifacts
 
     def _walk(self, root: Path, max_depth: int):
         for dirpath, dirnames, filenames in os.walk(root):
+            # Filter out excluded directories
+            dirnames[:] = [d for d in dirnames if d not in self.EXCLUDED_FOLDERS]
+            
             depth = len(Path(dirpath).relative_to(root).parts)
             if depth >= max_depth:
                 dirnames.clear()
@@ -96,6 +158,21 @@ class FileSystemParser:
 
             is_risky = ext in RISKY_EXTENSIONS
             is_safe = ext in SAFE_EXTENSIONS
+            is_context_dependent = ext in CONTEXT_DEPENDENT_EXTENSIONS
+
+            # Special handling for context-dependent files (like .js)
+            if is_context_dependent and ext in [".js", ".jsx"]:
+                # Check file content for malicious patterns
+                malicious_pattern_count = self._check_malicious_js_patterns(path)
+                if malicious_pattern_count > 0:
+                    # Found malicious patterns - treat as risky
+                    rule_score = max(rule_score, 60 + (malicious_pattern_count * 5))
+                    is_risky = True
+                    is_safe = False
+                else:
+                    # No malicious patterns - treat as safe
+                    is_safe = True
+                    is_risky = False
 
             artifact = {
                 "type":          "file",
@@ -122,6 +199,33 @@ class FileSystemParser:
         except (PermissionError, OSError) as e:
             log.debug(f"Skipping {path}: {e}")
             return None
+
+    def _check_malicious_js_patterns(self, path: Path) -> int:
+        """
+        Check JavaScript file for malicious patterns.
+        Returns count of suspicious patterns found.
+        """
+        try:
+            # Only check small files (< 1MB) to avoid performance issues
+            if path.stat().st_size > 1_000_000:
+                return 0
+            
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(100_000)  # Read first 100KB
+                
+            content_lower = content.lower()
+            pattern_count = 0
+            
+            for pattern in MALICIOUS_JS_PATTERNS:
+                if pattern.lower() in content_lower:
+                    pattern_count += 1
+                    log.debug(f"Found suspicious pattern '{pattern}' in {path.name}")
+            
+            return pattern_count
+            
+        except Exception as e:
+            log.debug(f"Could not check JS patterns in {path}: {e}")
+            return 0
 
     @staticmethod
     def _hash_file(path: Path, chunk: int = 65536) -> str:
@@ -158,9 +262,9 @@ class EventLogParser:
             import Evtx.Evtx as evtx
             import Evtx.Views as e_views
         except ImportError:
-            log.warning("python-evtx not installed. Skipping EVTX parsing.")
-            log.warning("Install with: pip install python-evtx")
-            return self._mock_events()
+            log.error("python-evtx not installed. Cannot parse EVTX files.")
+            log.error("Install with: pip install python-evtx")
+            return []
 
         try:
             with evtx.Evtx(evtx_path) as log_file:
@@ -272,6 +376,10 @@ class BrowserHistoryParser:
 
     def _parse_sqlite(self, db_path: str, query: str, browser: str) -> list[dict]:
         artifacts = []
+        if not Path(db_path).exists():
+            log.warning(f"Browser history file not found: {db_path}")
+            return []
+            
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
             cursor = conn.execute(query)
@@ -281,8 +389,8 @@ class BrowserHistoryParser:
                     artifacts.append(artifact)
             conn.close()
         except sqlite3.Error as e:
-            log.warning(f"Browser DB error ({db_path}): {e}")
-            return self._mock_history()
+            log.error(f"Browser DB error ({db_path}): {e}")
+            return []
 
         log.info(f"Browser history ({browser}): {len(artifacts)} entries")
         return artifacts
@@ -374,9 +482,9 @@ class NetworkPacketParser:
         try:
             from scapy.all import rdpcap, IP, TCP, UDP
         except ImportError:
-            log.warning("scapy not installed. Skipping PCAP parsing.")
-            log.warning("Install with: pip install scapy")
-            return self._mock_packets()
+            log.error("scapy not installed. Cannot parse PCAP files.")
+            log.error("Install with: pip install scapy")
+            return []
 
         artifacts = []
         try:
@@ -387,7 +495,7 @@ class NetworkPacketParser:
                     artifacts.append(artifact)
         except Exception as e:
             log.error(f"PCAP error ({pcap_path}): {e}")
-            return self._mock_packets()
+            return []
 
         log.info(f"PCAP: {len(artifacts)} packets from {pcap_path}")
         return artifacts
@@ -500,12 +608,14 @@ class EvidenceCollector:
     def collect(self, config: dict) -> list[dict]:
         """
         config keys (all optional):
-          fs_path, evtx_path, chrome_history, firefox_history, pcap_path
+          fs_path, evtx_path, chrome_history, firefox_history, pcap_path, max_files
         """
         all_artifacts = []
+        max_files = config.get("max_files", 1000)  # Default limit: 1000 files
 
         if path := config.get("fs_path"):
-            all_artifacts.extend(self.fs_parser.parse(path))
+            log.info(f"Scanning file system: {path} (max {max_files} files)")
+            all_artifacts.extend(self.fs_parser.parse(path, max_files=max_files))
 
         if path := config.get("evtx_path"):
             all_artifacts.extend(self.evtx_parser.parse(path))
@@ -527,17 +637,49 @@ class EvidenceCollector:
 
 if __name__ == "__main__":
     import json
+    import sys
+    import argparse
+    
+    # Configure logging to output to stderr (so it doesn't interfere with JSON output)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        stream=sys.stderr
+    )
+    
+    parser = argparse.ArgumentParser(description="SPECTRA Evidence Collector")
+    parser.add_argument("--config", type=str, help="JSON config string with paths")
+    parser.add_argument("--config-file", type=str, help="Path to JSON config file")
+    args = parser.parse_args()
+    
     collector = EvidenceCollector()
+    
+    if args.config_file:
+        # Read config from file (avoids Windows command-line escaping issues)
+        log.info(f"Reading config from: {args.config_file}")
+        with open(args.config_file, 'r') as f:
+            config = json.load(f)
+        log.info(f"Config loaded: {list(config.keys())}")
+        artifacts = collector.collect(config)
+        log.info(f"Collection complete: {len(artifacts)} artifacts")
+        # Output as JSON for Java to parse (to stdout)
+        print(json.dumps(artifacts, default=str))
+    elif args.config:
+        # Parse config from command line
+        config = json.loads(args.config)
+        artifacts = collector.collect(config)
+        # Output as JSON for Java to parse
+        print(json.dumps(artifacts, default=str))
+    else:
+        # Demo: scan current directory
+        artifacts = collector.collect({
+            "fs_path": str(Path.cwd()),
+        })
+        # Add mock browser + pcap data
+        artifacts.extend(BrowserHistoryParser()._mock_history())
+        artifacts.extend(NetworkPacketParser()._mock_packets())
+        artifacts.extend(EventLogParser()._mock_events())
 
-    # Demo: scan current directory
-    artifacts = collector.collect({
-        "fs_path": str(Path.cwd()),
-    })
-    # Add mock browser + pcap data
-    artifacts.extend(BrowserHistoryParser()._mock_history())
-    artifacts.extend(NetworkPacketParser()._mock_packets())
-    artifacts.extend(EventLogParser()._mock_events())
-
-    print(f"\n✔ Collected {len(artifacts)} artifacts")
-    for a in artifacts[:5]:
-        print(json.dumps(a, indent=2, default=str))
+        print(f"\n✔ Collected {len(artifacts)} artifacts")
+        for a in artifacts[:5]:
+            print(json.dumps(a, indent=2, default=str))

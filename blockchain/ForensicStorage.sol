@@ -157,7 +157,8 @@ contract ForensicStorage {
         bytes memory bstr = bytes(hexStr);
         require(bstr.length == 64, "ForensicStorage: invalid hex length");
         for (uint i = 0; i < 32; i++) {
-            result |= bytes32(_hexCharToByte(bstr[2*i]) * 16 + _hexCharToByte(bstr[2*i+1])) >> (i * 8);
+            uint8 byteValue = _hexCharToByte(bstr[2*i]) * 16 + _hexCharToByte(bstr[2*i+1]);
+            result |= bytes32(uint256(byteValue)) >> (i * 8);
         }
     }
 

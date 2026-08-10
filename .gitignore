@@ -1,18 +1,263 @@
-# Python
-__pycache__/
-*.pyc
+# ============================================
+# SPECTRA - Digital Forensics Platform
+# .gitignore - Files to exclude from Git
+# ============================================
 
-# Build
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Python distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# ============================================
+# Java / Maven
+# ============================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ============================================
+# Node.js / React
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Build outputs
+build/
+dist/
 .dist/
 
-# Node
-node_modules/
+# Dependency lock files (optional - uncomment if you want to ignore)
+# package-lock.json
+# yarn.lock
 
-# Env
+# ============================================
+# Environment Variables
+# ============================================
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# OS
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+
+# MongoDB
+data/db/
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================
+# Operating System
+# ============================================
+# macOS
 .DS_Store
-Thumbs.db
+.AppleDouble
+.LSOverride
+._*
 
-.env
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# IDE / Editors
+# ============================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw[a-p]
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# AI Engine / ML Models
+# ============================================
+# Ignore large datasets (keep small samples)
+ai-engine/data/*.csv
+ai-engine/data/*.pcap
+ai-engine/data/*.evtx
+
+# Keep trained models
+!ai-engine/models/*.pkl
+!ai-engine/models/*.json
+
+# ============================================
+# Blockchain
+# ============================================
+# Keep deployment.json but ignore local blockchain data
+blockchain/ganache_db/
+blockchain/node_modules/
+
+# Keep deployment info
+!blockchain/deployment.json
+
+# ============================================
+# Testing
+# ============================================
+# Test outputs
+test_*.py
+test_*.json
+output.json
+*.test.js.snap
+
+# Coverage reports
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# ============================================
+# Security / Secrets
+# ============================================
+# Never commit these!
+*.pem
+*.key
+*.cert
+*.crt
+secrets.json
+credentials.json
+.secrets/
+
+# ============================================
+# Evidence / Forensic Data
+# ============================================
+# Don't commit actual evidence files
+evidence/
+Evidence/
+forensic_data/
+case_files/
+
+# Test evidence folders created by scripts
+TrainedAttackTest/
+UnseenAttackTest/
+BenignTest/
+MultiEvidenceTest/
+
+# ============================================
+# Documentation
+# ============================================
+# Keep all markdown documentation files
+# All .md files are tracked by default
+
+# ============================================
+# Project Specific
+# ============================================
+# Keep important config files
+!backend/src/main/resources/application.yml
+!frontend/.env.example

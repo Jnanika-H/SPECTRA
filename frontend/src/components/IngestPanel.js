@@ -19,9 +19,29 @@ export default function IngestPanel({ caseId, onIngested }) {
   const handleIngest = async () => {
     setLoading(true);
     try {
-      const artifacts = mode === "demo" ? DEMO_ARTIFACTS : [];
+      let artifacts;
+      if (mode === "demo") {
+        artifacts = DEMO_ARTIFACTS;
+      } else {
+        // Send paths to backend for real evidence collection
+        const config = {};
+        if (paths.fs) config.fs_path = paths.fs;
+        if (paths.evtx) config.evtx_path = paths.evtx;
+        if (paths.chrome) config.chrome_history = paths.chrome;
+        if (paths.pcap) config.pcap_path = paths.pcap;
+        
+        if (Object.keys(config).length === 0) {
+          setStatus("Please enter at least one path");
+          setLoading(false);
+          return;
+        }
+        
+        // Send config to backend as array (backend expects List)
+        artifacts = [{ mode: "collect", config }];
+      }
+      
       await ingestEvidence(caseId, artifacts);
-      setStatus(`${artifacts.length} artifacts ingested into case ${caseId}`);
+      setStatus(`Evidence ingested into case ${caseId}. Click Run Analysis.`);
       onIngested && onIngested();
     } catch (e) {
       setStatus(`Ingest failed: ${e.response?.data?.message || e.message}`);
@@ -55,11 +75,29 @@ export default function IngestPanel({ caseId, onIngested }) {
 
       {mode === "paths" && (
         <div className="paths-form">
+          <div className="info-box" style={{
+            background: '#fff3cd', 
+            border: '1px solid #ffc107', 
+            padding: '12px', 
+            borderRadius: '4px',
+            marginBottom: '15px',
+            fontSize: '14px',
+            color: '#856404'  // Dark yellow/brown text for better contrast
+          }}>
+            <strong style={{color: '#856404'}}>⚠️ Large Folder Scanning:</strong>
+            <ul style={{margin: '8px 0', paddingLeft: '20px', color: '#856404'}}>
+              <li>Maximum 1,000 files per scan (prevents timeouts)</li>
+              <li>Automatically skips: node_modules, .git, __pycache__, etc.</li>
+              <li>For large folders (Downloads, Desktop), consider scanning subfolders</li>
+              <li>Example: <code style={{background: '#ffeaa7', padding: '2px 4px', borderRadius: '3px', color: '#2d3436'}}>C:\Users\YourName\Documents</code> instead of entire Desktop</li>
+            </ul>
+          </div>
+          
           {[
-            { key: "fs",     label: "File System Path",     ph: "/evidence/disk_image" },
-            { key: "evtx",   label: "Windows EVTX Path",    ph: "/evidence/Security.evtx" },
-            { key: "chrome", label: "Chrome History Path",  ph: "/evidence/History" },
-            { key: "pcap",   label: "Network Capture Path", ph: "/evidence/capture.pcap" },
+            { key: "fs",     label: "File System Path",     ph: "C:\\Users\\YourName\\Documents" },
+            { key: "evtx",   label: "Windows EVTX Path",    ph: "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx" },
+            { key: "chrome", label: "Chrome History Path",  ph: "C:\\Users\\YourName\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History" },
+            { key: "pcap",   label: "Network Capture Path", ph: "C:\\Evidence\\capture.pcap" },
           ].map(({ key, label, ph }) => (
             <div className="path-row" key={key}>
               <label>{label}</label>
