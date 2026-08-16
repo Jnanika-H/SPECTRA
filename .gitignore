@@ -243,6 +243,10 @@ Evidence/
 forensic_data/
 case_files/
 
+# Evidence storage (forensic images uploaded via backend)
+evidence-storage/
+!evidence-storage/.gitkeep
+
 # Test evidence folders created by scripts
 TrainedAttackTest/
 UnseenAttackTest/

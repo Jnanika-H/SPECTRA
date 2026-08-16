@@ -16,7 +16,8 @@ export default function DashboardPage() {
   const [selected, setSelected]       = useState(null);
   const [loading, setLoading]         = useState(false);
   const [statusMsg, setStatusMsg]     = useState("");
-  const [activeTab, setActiveTab]     = useState("overview");
+  const [activeTab, setActiveTab]     = useState("ingest");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [caseId, setCaseId]           = useState("CASE-001");
   const [caseInput, setCaseInput]     = useState("CASE-001");
   const [timeline, setTimeline]       = useState(null);
@@ -96,10 +97,10 @@ export default function DashboardPage() {
 
   return (
     <div className="dash-root">
-      <aside className="dash-sidebar">
-        <div className="sidebar-brand">
-          <span className="sidebar-logo">S</span>
-          <span className="sidebar-title">SPECTRA</span>
+      <aside className={`dash-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-brand" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
+          <span className="sidebar-logo">{sidebarCollapsed ? 'S' : '☰'}</span>
+          {!sidebarCollapsed && <span className="sidebar-title">SPECTRA</span>}
         </div>
         <nav className="sidebar-nav">
           {[
@@ -109,14 +110,17 @@ export default function DashboardPage() {
             {id:"blockchain",label:"Blockchain",icon:"⛓"},
             {id:"ingest",label:"Ingest",icon:"＋"},
           ].map(tab => (
-            <button key={tab.id} className={"sidebar-link"+(activeTab===tab.id?" active":"")} onClick={()=>setActiveTab(tab.id)}>
-              <span className="sidebar-icon">{tab.icon}</span>{tab.label}
+            <button key={tab.id} className={"sidebar-link"+(activeTab===tab.id?" active":"")} onClick={()=>setActiveTab(tab.id)} title={sidebarCollapsed ? tab.label : ''}>
+              <span className="sidebar-icon">{tab.icon}</span>
+              {!sidebarCollapsed && <span>{tab.label}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="sidebar-user">{user?.username}</div>
-          <button className="sidebar-logout" onClick={logout}>Sign out</button>
+          {!sidebarCollapsed && <div className="sidebar-user">{user?.username}</div>}
+          <button className="sidebar-logout" onClick={logout} title={sidebarCollapsed ? 'Sign out' : ''}>
+            {sidebarCollapsed ? '⏻' : 'Sign out'}
+          </button>
         </div>
       </aside>
 

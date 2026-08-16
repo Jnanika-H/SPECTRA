@@ -27,6 +27,14 @@ public class Evidence {
 
     private String evidenceType;      // file | event_log | browser_history | network_packet
     private String sourcePath;
+    
+    // NEW: Forensic evidence metadata
+    private String evidenceSourceType;  // SYSTEM_PATH | FORENSIC_IMAGE
+    private String forensicImagePath;   // Path to forensic image (if applicable)
+    private String forensicImageFormat; // E01/EWF | RAW/DD
+    private Integer forensicSegmentCount; // Number of image segments
+    private String forensicFilesystemType; // NTFS | FAT32 | EXT4 | etc.
+    private Long forensicInode;         // Inode number in forensic image
 
     // Raw artifact payload from evidence collector
     private Map<String, Object> rawArtifact;

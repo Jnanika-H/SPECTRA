@@ -31,28 +31,88 @@ public class EvidenceService {
         List<Evidence> saved = new ArrayList<>();
         List<Map<String, Object>> artifacts = req.getArtifacts();
         
-        // Check if this is a real evidence collection request
-        if (artifacts.size() == 1 && artifacts.get(0).containsKey("mode") 
-            && "collect".equals(artifacts.get(0).get("mode"))) {
-            // Call Python evidence collector
-            Map<String, Object> config = (Map<String, Object>) artifacts.get(0).get("config");
-            artifacts = collectRealEvidence(config);
-            log.info("Collected {} real artifacts from paths", artifacts.size());
+        // Check if this is a forensic image collection request
+        if (artifacts.size() == 1 && artifacts.get(0).containsKey("mode")) {
+            String mode = (String) artifacts.get(0).get("mode");
+            
+            if ("collect_forensic".equals(mode)) {
+                // Call Python forensic evidence collector
+                Map<String, Object> config = (Map<String, Object>) artifacts.get(0).get("config");
+                Map<String, Object> forensicResult = collectForensicEvidence(config);
+                
+                if ("success".equals(forensicResult.get("status"))) {
+                    artifacts = (List<Map<String, Object>>) forensicResult.get("artifacts");
+                    Map<String, Object> metadata = (Map<String, Object>) forensicResult.get("metadata");
+                    
+                    log.info("Collected {} artifacts from forensic image", artifacts.size());
+                    log.info("Image format: {}", metadata.get("image_format"));
+                    log.info("Filesystem: {}", metadata.get("filesystem_type"));
+                    
+                    // Store evidence with forensic metadata
+                    for (Map<String, Object> rawArt : artifacts) {
+                        // Add forensic source metadata
+                        rawArt.put("evidence_source_type", "FORENSIC_IMAGE");
+                        rawArt.put("forensic_metadata", metadata);
+                        
+                        Evidence evidence = buildEvidenceFromArtifact(req.getCaseId(), submitter, rawArt);
+                        saved.add(mongo.save(evidence));
+                    }
+                } else {
+                    log.error("Forensic collection failed: {}", forensicResult.get("error"));
+                    throw new RuntimeException("Forensic collection failed: " + forensicResult.get("error"));
+                }
+                
+                return saved;
+            } else if ("collect".equals(mode)) {
+                // Existing system path collection
+                Map<String, Object> config = (Map<String, Object>) artifacts.get(0).get("config");
+                artifacts = collectRealEvidence(config);
+                log.info("Collected {} real artifacts from paths", artifacts.size());
+            }
         }
         
+        // Process artifacts (either from demo, system paths, or forensic image)
         for (Map<String, Object> rawArt : artifacts) {
-            Evidence evidence = Evidence.builder()
-                .caseId(req.getCaseId())
-                .submittedBy(submitter)
-                .submittedAt(Instant.now())
-                .evidenceType(String.valueOf(rawArt.getOrDefault("type", "unknown")))
-                .rawArtifact(rawArt)
-                .features(extractFeatures(rawArt))
-                .build();
+            Evidence evidence = buildEvidenceFromArtifact(req.getCaseId(), submitter, rawArt);
             saved.add(mongo.save(evidence));
         }
+        
         log.info("Ingested {} artifacts for case {}", saved.size(), req.getCaseId());
         return saved;
+    }
+    
+    private Evidence buildEvidenceFromArtifact(String caseId, String submitter, Map<String, Object> rawArt) {
+        Evidence.EvidenceBuilder builder = Evidence.builder()
+            .caseId(caseId)
+            .submittedBy(submitter)
+            .submittedAt(Instant.now())
+            .evidenceType(String.valueOf(rawArt.getOrDefault("type", "unknown")))
+            .rawArtifact(rawArt)
+            .features(extractFeatures(rawArt));
+        
+        // Add forensic metadata if present
+        String sourceType = (String) rawArt.get("evidence_source_type");
+        if ("FORENSIC_IMAGE".equals(sourceType)) {
+            builder.evidenceSourceType("FORENSIC_IMAGE");
+            
+            Map<String, Object> forensicMeta = (Map<String, Object>) rawArt.get("forensic_metadata");
+            if (forensicMeta != null) {
+                builder.forensicImagePath((String) forensicMeta.get("image_path"));
+                builder.forensicImageFormat((String) forensicMeta.get("image_format"));
+                builder.forensicSegmentCount(((Number) forensicMeta.getOrDefault("segment_count", 1)).intValue());
+                builder.forensicFilesystemType((String) forensicMeta.get("filesystem_type"));
+            }
+            
+            // Store inode if available
+            Object inode = rawArt.get("inode");
+            if (inode instanceof Number) {
+                builder.forensicInode(((Number) inode).longValue());
+            }
+        } else {
+            builder.evidenceSourceType("SYSTEM_PATH");
+        }
+        
+        return builder.build();
     }
     
     @SuppressWarnings("unchecked")
@@ -155,6 +215,99 @@ public class EvidenceService {
                 tempFile.delete();
             }
             return new ArrayList<>();
+        }
+    }
+    
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> collectForensicEvidence(Map<String, Object> config) {
+        java.io.File tempFile = null;
+        try {
+            // Call Python forensic evidence collector script
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String configJson = mapper.writeValueAsString(config);
+            
+            // Write config to temporary file
+            tempFile = java.io.File.createTempFile("spectra_forensic_config_", ".json");
+            java.nio.file.Files.write(tempFile.toPath(), configJson.getBytes());
+            
+            // Get the project root directory
+            String projectRoot = System.getProperty("user.dir");
+            if (projectRoot.endsWith("backend")) {
+                projectRoot = new java.io.File(projectRoot).getParent();
+            }
+            String scriptPath = projectRoot + java.io.File.separator + "ingestion" + 
+                               java.io.File.separator + "forensic_evidence_collector.py";
+            
+            log.info("Calling forensic Python script at: {}", scriptPath);
+            log.info("Case ID: {}, Image: {}", config.get("case_id"), config.get("image_path"));
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                "python", 
+                scriptPath,
+                "--config-file", tempFile.getAbsolutePath()
+            );
+            Process process = pb.start();
+            
+            // Read output - separate JSON from logs
+            java.io.BufferedReader stdoutReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream())
+            );
+            java.io.BufferedReader stderrReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getErrorStream())
+            );
+            
+            // Read stderr (logs) in a separate thread
+            StringBuilder logs = new StringBuilder();
+            Thread logThread = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = stderrReader.readLine()) != null) {
+                        logs.append(line).append("\n");
+                        // Log important messages
+                        if (line.contains("INFO") || line.contains("ERROR") || 
+                            line.contains("WARNING") || line.contains("Progress")) {
+                            log.info("Forensic: {}", line);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error reading forensic stderr: {}", e.getMessage());
+                }
+            });
+            logThread.start();
+            
+            // Read stdout (JSON only)
+            StringBuilder jsonOutput = new StringBuilder();
+            String line;
+            while ((line = stdoutReader.readLine()) != null) {
+                jsonOutput.append(line);
+            }
+            
+            int exitCode = process.waitFor();
+            logThread.join(1000);
+            
+            // Clean up temp file
+            if (tempFile != null && tempFile.exists()) {
+                tempFile.delete();
+            }
+            
+            if (exitCode != 0) {
+                log.error("Forensic collector failed with exit code {}", exitCode);
+                log.error("Logs: {}", logs.toString());
+                return Map.of("status", "error", "error", "Forensic collection script failed");
+            }
+            
+            // Parse JSON output
+            String jsonStr = jsonOutput.toString();
+            log.info("Received {} bytes from forensic collector", jsonStr.length());
+            
+            return mapper.readValue(jsonStr, Map.class);
+                
+        } catch (Exception e) {
+            log.error("Failed to collect forensic evidence: {}", e.getMessage(), e);
+            if (tempFile != null && tempFile.exists()) {
+                tempFile.delete();
+            }
+            return Map.of("status", "error", "error", e.getMessage());
         }
     }
 

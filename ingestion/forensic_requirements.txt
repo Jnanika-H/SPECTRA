@@ -1,0 +1,27 @@
+# SPECTRA Forensic Image Dependencies
+# =====================================
+# These dependencies are OPTIONAL and only required for forensic disk image ingestion.
+# The existing SPECTRA functionality works without these.
+
+# Install with: pip install -r forensic_requirements.txt
+
+# libewf Python bindings for E01/EWF forensic image support
+# Note: This requires libewf C library to be installed first
+# Windows: Download from https://github.com/libyal/libewf/releases
+# Linux: apt-get install libewf-dev (Debian/Ubuntu) or yum install libewf-devel (RHEL/CentOS)
+# Mac: brew install libewf
+libewf-python>=20171104
+
+# pytsk3 for filesystem parsing (NTFS, FAT32, EXT4, etc.)
+# Note: This requires The Sleuth Kit (TSK) C library
+# Windows: Included in Python wheel
+# Linux: apt-get install libtsk-dev (Debian/Ubuntu)
+# Mac: brew install sleuthkit
+pytsk3>=20230125
+
+# Note on installation:
+# If you encounter installation issues:
+# 1. Try installing pre-built wheels (available for Windows)
+# 2. Install system dependencies first (libewf, sleuthkit)
+# 3. For development/testing without real forensic images, SPECTRA will
+#    detect missing dependencies and provide clear error messages

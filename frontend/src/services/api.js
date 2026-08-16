@@ -45,6 +45,39 @@ export const ingestEvidence = (caseId, artifacts) =>
 export const analyzeCase = (caseId) =>
   api.post("/ingest/analyze", { caseId });
 
+// Upload forensic evidence files with progress tracking
+export const uploadForensicEvidence = async (caseId, files, onProgress) => {
+  const formData = new FormData();
+  formData.append("caseId", caseId);
+  
+  // Append all files (for split images)
+  files.forEach((file, index) => {
+    formData.append("evidenceFiles", file);
+  });
+  
+  try {
+    const response = await api.post("/evidence/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 600000, // 10 minutes for large files
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          if (onProgress) {
+            onProgress(percentCompleted);
+          }
+        }
+      },
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error("Upload failed:", error);
+    throw error;
+  }
+};
+
 // ── Reports ──────────────────────────────────────────────────────────────────
 export const getReports = () => api.get("/reports");
 

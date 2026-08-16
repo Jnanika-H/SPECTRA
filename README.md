@@ -261,15 +261,53 @@ Login: `admin / admin123`
 
 ## Full E2E Workflow
 
+### Option 1: Demo Data (Quick Test)
 ```
 1. Login at http://localhost:3000/login
-2. Go to Ingest tab → click "Ingest into CASE-001" (demo data)
-3. Click "Run Analysis" (top bar)
+2. Go to Ingest tab → "Demo Data"
+3. Click "Ingest into CASE-001"
+4. Click "Run Analysis" (top bar)
+   → Scores, timeline, and report generated
+```
+
+### Option 2: System Paths (Existing)
+```
+1. Login at http://localhost:3000/login
+2. Go to Ingest tab → "System Paths"
+3. Enter paths: filesystem, EVTX, browser, PCAP
+4. Click "Ingest into CASE-001"
+5. Click "Run Analysis"
    → Spring Boot calls Flask /score and /anomaly for each artifact
    → Scores written to MongoDB
    → Timeline built via Flask /timeline
    → Report generated with SHA-256 hash
    → Hash stored on Ethereum via blockchain.py
+```
+
+### Option 3: Forensic Disk Image (NEW) 🆕
+```
+1. Login at http://localhost:3000/login
+2. Go to Ingest tab → "Forensic Image"
+3. Click "Browse for Evidence" button
+4. Use native file picker to select:
+   - Single file: disk.dd or IMAGE.E01
+   - Split image: IMAGE.E01, IMAGE.E02, IMAGE.E03 (select all)
+5. (Optional) Click "Validate Evidence"
+6. Click "Ingest into CASE-001"
+   → Files upload to secure storage (progress shown)
+   → E01/EWF reader opens forensic image
+   → Filesystem parsed (NTFS, FAT32, etc.)
+   → Artifacts extracted
+   → Stored in MongoDB
+7. Click "Run Analysis"
+   → AI scoring and anomaly detection
+   → Timeline reconstruction
+   → Report generation
+   → Blockchain verification
+```
+
+### After Analysis (All Options)
+```
 4. View Overview tab → stat cards + charts update
 5. View Evidence tab → priority-ranked table with scores
 6. View Timeline tab → chronological crime reconstruction
@@ -279,6 +317,26 @@ Login: `admin / admin123`
    → When 50+ samples accumulate, auto-retrain triggers
    → Flask /retrain called → new models saved
 ```
+
+---
+
+## 🆕 New Feature: Forensic Disk Image Upload
+
+SPECTRA now supports **browser-based forensic image ingestion** with a native file picker:
+
+- ✅ **No manual path typing** - Use Browse button with OS file picker
+- ✅ **Split image support** - Select all E01 segments together (E01, E02, E03...)
+- ✅ **Large file handling** - Streams up to 10GB per file, 50GB total
+- ✅ **Secure storage** - Evidence stored in `evidence-storage/<case-id>/`
+- ✅ **Integrity verification** - SHA-256 hash calculated and stored
+- ✅ **Progress tracking** - Visual upload progress for large files
+- ✅ **Format detection** - Automatic detection of E01/EWF, RAW/DD formats
+
+**Supported Formats:**
+- E01/EWF (EnCase Expert Witness Format) - single or split segments
+- RAW/DD (Raw disk images)
+
+**See:** `FORENSIC_IMAGE_QUICK_REFERENCE.md` for complete guide
 
 ---
 

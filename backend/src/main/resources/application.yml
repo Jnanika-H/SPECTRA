@@ -13,6 +13,14 @@ spring:
   web:
     cors:
       allowed-origins: "http://localhost:3000"
+  # File upload configuration for forensic evidence
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10GB        # Maximum size per file
+      max-request-size: 50GB     # Maximum total request size
+      file-size-threshold: 10MB  # Files larger than this are written to disk during upload
+      location: ${java.io.tmpdir}  # Temporary storage during upload
 
 spectra:
   jwt:
